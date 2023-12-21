@@ -1,0 +1,384 @@
+from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QListWidget, QMessageBox, QRadioButton, QShortcut, QProgressBar)
+from PyQt5.QtCore import pyqtSlot, QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QKeySequence
+import sys
+import pyautogui
+import threading
+import time
+
+
+class AutomationThread(QThread):
+    update_progress = pyqtSignal(int)
+    update_loop_indicator = pyqtSignal(int, int)  # New signal for loop indicator
+    automation_completed = pyqtSignal()
+
+    def __init__(self, positions, num_loops):
+        super().__init__()
+        self.positions = positions
+        self.num_loops = num_loops
+        self.paused = False
+        self.running = True
+
+    def run(self):
+        try:
+            total_steps = self.num_loops * len(self.positions)
+            current_step = 0
+            for loop_num in range(1, self.num_loops + 1):
+                for position, interval, click_type in self.positions:
+                    if not self.running:
+                        return  # Exit if not running
+                    while self.paused:
+                        QThread.msleep(100)
+                    if click_type == 'single':
+                        pyautogui.click(position)
+                    elif click_type == 'double':
+                        pyautogui.doubleClick(position)
+                    elif click_type == 'right':
+                        pyautogui.rightClick(position)
+                    elif click_type is None:
+                        pyautogui.moveTo(position)
+                    QThread.msleep(int(interval * 1000))
+                    current_step += 1
+                    self.update_progress.emit(int(current_step / total_steps * 100))
+                self.update_loop_indicator.emit(loop_num, self.num_loops)  # Update loop indicator
+            self.automation_completed.emit()
+
+        except Exception as e:
+            print(f"Error during automation: {e}")
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
+
+    def stop(self):
+        self.running = False
+        self.wait()  # Wait for the thread to finish
+
+class ClickAutomationApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        self.paused = False  # Initialize paused attribute
+
+        self.positions = []  # List to hold positions and intervals
+        self.num_loops = 0
+        self.running = False
+        self.automation_thread = None
+
+    def initUI(self):
+        # Main layout
+        self.layout = QVBoxLayout()  # Store layout as an attribute
+        layout = QVBoxLayout()
+
+        # Row for position input
+        self.position_input = QLineEdit(self)
+        self.get_position_button = QPushButton('Get Position', self)
+        self.get_position_button.clicked.connect(self.getPosition)
+
+        position_layout = QHBoxLayout()
+        position_layout.addWidget(self.position_input)
+        position_layout.addWidget(self.get_position_button)
+
+        # Row for interval input
+        self.interval_input = QLineEdit(self)
+        interval_layout = QHBoxLayout()
+        interval_layout.addWidget(QLabel('Interval'))
+        interval_layout.addWidget(self.interval_input)
+
+        # Row for number of loops input
+        self.num_loops_input = QLineEdit(self)
+        loops_layout = QHBoxLayout()
+        loops_layout.addWidget(QLabel('Number of loops'))
+        loops_layout.addWidget(self.num_loops_input)
+
+        # Add More and Start buttons
+        self.add_more_button = QPushButton('Add', self)
+        self.add_more_button.clicked.connect(self.addMore)
+        self.start_button = QPushButton('Start', self)
+        self.start_button.clicked.connect(self.startAutomation)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addWidget(self.add_more_button)
+        buttons_layout.addWidget(self.start_button)
+
+        # List to display positions
+        self.positions_list = QListWidget(self)
+
+        # Click type selection
+        self.no_action_radio = QRadioButton("None")
+        self.single_click_radio = QRadioButton("Single Click")
+        self.double_click_radio = QRadioButton("Double Click")
+        self.right_click_radio = QRadioButton("Right Click")
+        self.no_action_radio.setChecked(True)  # Set "None" as the default selected option
+
+        click_type_layout = QHBoxLayout()
+        click_type_layout.addWidget(self.single_click_radio)
+        click_type_layout.addWidget(self.double_click_radio)
+        click_type_layout.addWidget(self.right_click_radio)
+        click_type_layout.addWidget(self.no_action_radio)  # Add the "None" radio button to the layout
+
+        # Add all rows to main layout
+        layout.addLayout(position_layout)
+        layout.addLayout(interval_layout)
+        layout.addLayout(loops_layout)
+        layout.addLayout(click_type_layout)
+        layout.addWidget(self.positions_list)
+        layout.addLayout(buttons_layout)
+
+
+        # Pause/Resume button (initially hidden)
+        self.pause_resume_button = QPushButton('Pause', self)
+        self.pause_resume_button.clicked.connect(self.togglePauseResume)
+        self.pause_resume_button.hide()  # Hide initially
+        layout.addWidget(self.pause_resume_button)
+
+        # Loop indicator label (initially hidden)
+        self.loop_indicator_label = QLabel('Loop: 0/0', self)
+        self.loop_indicator_label.setAlignment(Qt.AlignCenter)  # Center align the label
+        self.loop_indicator_label.hide()
+        layout.addWidget(self.loop_indicator_label)  # Add it above the progress bar
+
+
+        # Progress bar (initially hidden)
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setTextVisible(False)  # Hide the text
+        self.progress_bar.hide()  # Hide initially
+        layout.addWidget(self.progress_bar)
+
+        # Setting up keyboard shortcut for pause/resume
+        self.pause_resume_shortcut = QShortcut(QKeySequence('P'), self)
+        self.pause_resume_shortcut.activated.connect(self.togglePauseResume)
+
+        # Reset button
+        self.reset_button = QPushButton('Reset', self)
+        self.reset_button.clicked.connect(self.resetList)
+
+        # Add the reset button to the buttons layout
+        buttons_layout.addWidget(self.reset_button)
+
+        self.setLayout(layout)
+        self.setWindowTitle('Clicker')
+
+    @pyqtSlot()
+    def getPosition(self):
+        # Only show the message box if the list of positions is empty
+        if not self.positions:
+            QMessageBox.information(self, 'Get Position',
+                                    'Move your cursor to the desired position. The position will be captured in 5 seconds.')
+        threading.Thread(target=self.delayedGetPosition).start()
+
+    def delayedGetPosition(self):
+        time.sleep(5)
+        x, y = pyautogui.position()
+        self.position_input.setText(f'{x}, {y}')
+
+    @pyqtSlot()
+    def addMore(self):
+        try:
+            position = tuple(map(int, self.position_input.text().split(',')))
+            interval = float(self.interval_input.text())
+            click_type = None  # Default to None (no action)
+            if self.single_click_radio.isChecked():
+                click_type = 'single'
+            elif self.double_click_radio.isChecked():
+                click_type = 'double'
+            elif self.right_click_radio.isChecked():
+                click_type = 'right'
+            if not self.num_loops:
+                self.num_loops = int(self.num_loops_input.text())
+                self.num_loops_input.setDisabled(True)
+            self.positions.append((position, interval, click_type))
+            self.positions_list.addItem(f'Position: {position}, Interval: {interval}s, Click: {click_type}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Invalid input: {e}')
+
+    def setNonAutomationUIEnabled(self, enabled=True):
+        # Enable or disable all components except pause/resume button and progress bar
+        self.position_input.setEnabled(enabled)
+        self.get_position_button.setEnabled(enabled)
+        self.interval_input.setEnabled(enabled)
+        self.num_loops_input.setEnabled(enabled)
+        self.add_more_button.setEnabled(enabled)
+        self.start_button.setEnabled(enabled)
+        self.positions_list.setEnabled(enabled)
+        self.single_click_radio.setEnabled(enabled)
+        self.double_click_radio.setEnabled(enabled)
+        self.right_click_radio.setEnabled(enabled)
+        self.reset_button.setEnabled(enabled)
+
+    @pyqtSlot()
+    def startAutomation(self):
+        if self.running:
+            QMessageBox.information(self, 'Already running', 'Automation is already running.')
+            return
+        elif not self.positions:
+            QMessageBox.warning(self, 'No positions', 'Please add at least one position before starting.')
+            return
+        self.running = True
+        self.automation_thread = AutomationThread(self.positions, self.num_loops)
+        self.automation_thread.update_loop_indicator.connect(self.updateLoopIndicator)
+        self.automation_thread.update_progress.connect(self.updateProgressBar)
+        self.automation_thread.automation_completed.connect(self.autoClearList)
+        self.automation_thread.start()
+        self.pause_resume_button.show()
+        self.progress_bar.show()
+        self.loop_indicator_label.setText(f'Loop: 0/{self.num_loops}')  # Initialize loop indicator
+        self.loop_indicator_label.show()  # Show loop indicator
+        self.setNonAutomationUIEnabled(False)
+
+
+    def runAutomation(self):
+        total_steps = self.num_loops * len(self.positions)
+        current_step = 0
+        for _ in range(self.num_loops):
+            for position, interval, click_type in self.positions:
+                if not self.running:
+                    return  # Exit if not running
+                while self.paused:  # Pause loop
+                    time.sleep(0.1)
+                if click_type == 'single':
+                    pyautogui.click(position)
+                elif click_type == 'double':
+                    pyautogui.doubleClick(position)
+                elif click_type == 'right':
+                    pyautogui.rightClick(position)
+                elif click_type is None:
+                    pyautogui.moveTo(position)
+                time.sleep(interval)
+                current_step += 1
+                self.updateProgressBar(current_step / total_steps * 100)
+        self.running = False
+        self.start_button.setText('Start')
+        self.updateProgressBar(0)
+        self.pause_resume_button.hide()  # Hide the button
+        self.progress_bar.hide()  # Hide the progress bar
+
+    @pyqtSlot()
+    def togglePauseResume(self):
+        if self.paused:
+            self.automation_thread.resume()
+            self.pause_resume_button.setText('Pause')
+            self.paused = False
+        else:
+            self.automation_thread.pause()
+            self.pause_resume_button.setText('Resume')
+            self.paused = True
+
+    def updateProgressBar(self, value):
+        self.progress_bar.setValue(int(value))
+
+    def updateLoopIndicator(self, current_loop, total_loops):
+        self.loop_indicator_label.setText(f'Loop: {current_loop}/{total_loops}')
+        self.loop_indicator_label.show()
+
+    def autoClearList(self):
+        self.clearList()
+        self.running = False
+        self.setNonAutomationUIEnabled(True)
+        self.updateProgressBar(0)
+        self.loop_indicator_label.hide()  # Hide loop indicator
+        self.pause_resume_button.hide()
+        self.progress_bar.hide()
+        self.start_button.setText('Start')
+
+    def clearList(self):
+        # Clear the positions list and the QListWidget
+        self.positions.clear()
+        self.positions_list.clear()
+        self.num_loops_input.setDisabled(False)
+        self.num_loops = 0
+        self.position_input.clear()
+        self.interval_input.clear()
+        self.num_loops_input.clear()
+        self.pause_resume_button.hide()
+        self.progress_bar.hide()
+        self.start_button.setText('Start')
+
+    @pyqtSlot()
+    def resetList(self):
+        # Stop the thread if it's running
+        if self.running and self.automation_thread and self.automation_thread.isRunning():
+            self.automation_thread.stop()
+            self.automation_thread.wait()  # Wait for the thread to finish
+        self.clearList()
+
+    def closeEvent(self, event):
+        if self.automation_thread and self.automation_thread.isRunning():
+            self.automation_thread.stop()
+        event.accept()  # Ensure the event is accepted to close the window
+
+
+# def main():
+#     app = QApplication(sys.argv)
+#     ex = ClickAutomationApp()
+#     ex.show()
+#     sys.exit(app.exec_())
+
+def main():
+    app = QApplication(sys.argv)
+
+    # Set the global stylesheet for the application
+    app.setStyleSheet("""
+    QWidget {
+        background-color: #323232;
+        color: #EEEEEE;
+    }
+    QLineEdit, QListWidget {
+        background-color: #424242;
+        border: 1px solid #555555;
+    }
+    QPushButton {
+        background-color: #EEEEEE;
+        color: #000000;
+    }
+    """)
+
+    ex = ClickAutomationApp()
+    ex.show()
+    sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+# import pyautogui
+# import time
+# import keyboard  # you might need to install this package
+#
+# # Define the coordinates for positions a and b
+# position_a = (1845, 593)  # Replace x1, y1 with the actual coordinates for position a
+# position_b = (1856, 136)  # Replace x2, y2 with the actual coordinates for position b
+#
+# # Number of times to repeat the process
+# repeat_count = 806
+#
+# # 10-second delay before starting
+# print("Starting in 10 seconds...")
+# time.sleep(10)
+#
+# for _ in range(repeat_count):
+#     if keyboard.is_pressed('q'):  # If 'q' is pressed, break the loop
+#         print("Exiting...")
+#         break
+#
+#     # Move to position a and click
+#     pyautogui.click(position_a)
+#
+#     # Wait for 2 seconds
+#     time.sleep(3)
+#
+#     # Move to position b and click
+#     pyautogui.click(position_b)
+#
+#     # Wait for 0.5 seconds
+#     time.sleep(0.5)
+#
+#     # Return to position a
+#     pyautogui.moveTo(position_a)
+#
+# print("Process completed or exited.")
