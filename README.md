@@ -1,5 +1,27 @@
-Automate boring tasks by getting screen positions and choosing commands, interval of each position, and the amount of times the process repeats.
+# 🖱️ Clicker - Automation Tool
 
+Clicker is a PyQt6-based automation tool that allows users to define a series of actions to be executed in a loop, such as mouse clicks, text input, keyboard navigation, and more. The tool provides a user-friendly interface for adding, editing, and removing commands, and includes visual indicators for loop progress and estimated completion time.
+
+---
+
+## 🚀 Features
+
+- **Action Types:**
+  - Click, Double Click, Right Click
+  - Copy, Paste, Enter, Close Tab, Select All
+  - Text Input, Move Up/Down/Left/Right
+  - Go to End, Go to Beginning, Backspace
+
+- **Command Management:**
+  - Add, Edit, and Remove commands
+  - Define execution interval and loop count
+
+- **Execution Control:**
+  - Pause/Resume and Stop actions
+  - Visual loop indicator and progress bar
+  - Estimated time remaining for completion
+
+---
 
 # Main Layout:
 
