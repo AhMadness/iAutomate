@@ -1,6 +1,6 @@
-# 🖱️ Clicker - Automation Tool
+# 🖱️ iAutomate - Automation Tool
 
-Clicker is a PyQt6-based automation tool that allows users to define a series of actions to be executed in a loop, such as mouse clicks, text input, keyboard navigation, and more. The tool provides a user-friendly interface for adding, editing, and removing commands, and includes visual indicators for loop progress and estimated completion time.
+iAutomate is a PyQt6-based automation tool that allows users to define a series of actions to be executed in a loop, such as mouse clicks, text input, keyboard navigation, and more. The tool provides a user-friendly interface for adding, editing, and removing commands, and includes visual indicators for loop progress and estimated completion time.
 
 ---
 
